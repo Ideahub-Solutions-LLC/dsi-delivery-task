@@ -2,9 +2,12 @@
   "name": "dsi-daily-delivery",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "Offline copy of the DSI Daily Delivery site",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.cjs",
+    "build": "node build.mjs",
+    "test": "node --test tests/"
   },
   "engines": {
     "node": "22.x"

@@ -1,7 +1,7 @@
 // Local server for the DSI Daily Delivery site.
 // Serves the downloaded static files and re-creates the /api/state endpoint
 // (GET = load shared progress, POST = save a task / milestone / metrics update).
-// No dependencies: run with `node server.js`, then open http://localhost:3000
+// No dependencies: run with `node server.cjs`, then open http://localhost:3000
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
