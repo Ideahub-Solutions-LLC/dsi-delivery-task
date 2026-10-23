@@ -4,11 +4,15 @@ Downloaded from https://dsi-daily-delivery-oct-dec-2026.ideahub-9058.chatgpt.sit
 
 ## Run it
 
-1. Install Node.js 18 or newer (no other packages are needed).
-2. In this folder, run: `node server.cjs`
-3. Open http://localhost:3000
+1. Install Node.js 22 or newer (no other packages are needed).
+2. In this folder, run: `npm start` (runs `node dev.mjs`, which reads `.env`)
+3. Open http://localhost:3000 — set `PORT` to use another port, e.g. `PORT=3005 npm start`
 
-Opening `index.html` directly from disk will show a blank page: the app loads JavaScript modules from
+`npm start` runs the same app that is deployed to Vercel (`public/` + `api/app.js`), with the login,
+sign-up and My profile pages described below.
+
+To run the original downloaded copy instead (no login), use `npm run start:offline` (`node server.cjs`).
+Opening its `index.html` directly from disk will show a blank page: it loads JavaScript modules from
 absolute `/_next/...` paths, which browsers only allow over http(s). Use the server, or any static host
 that serves this folder at the site root and also provides the `/api/state` endpoint below.
 
@@ -22,7 +26,7 @@ that serves this folder at the site root and also provides the `/api/state` endp
 | `favicon.svg` | Site icon |
 | `data/state.json` | Snapshot of the shared tracker progress (`/api/state`) at download time |
 | `server.cjs` | Zero-dependency local server: serves the files and re-creates `/api/state` |
-| `package.json` | Lets you run `npm start` instead of `node server.cjs` |
+| `package.json` | `npm start` runs the Vercel app locally (`dev.mjs`); `npm run start:offline` runs `server.cjs` |
 
 ## About `/api/state`
 
