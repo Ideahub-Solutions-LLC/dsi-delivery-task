@@ -69,3 +69,12 @@ test('team password still works while accounts are unavailable',async()=>{
  const boot=await call('bootstrap',null,cookieOf(login));assert.equal(boot.code,200);assert.equal(boot.value.user,null);
  }finally{for(const k of ['APP_PASSWORD','SESSION_SECRET'])delete process.env[k]}
 });
+test('Vercel Upstash integration variable names enable shared storage',async()=>{
+ const original=global.fetch;let seen;global.fetch=async(url,opts)=>{seen={url,auth:opts.headers.Authorization};return {ok:true,json:async()=>({result:null})}};
+ try{
+ process.env.APP_PASSWORD='test-only-password';process.env.SESSION_SECRET='test-only-secret-with-more-than-32-characters';process.env.KV_REST_API_URL='https://kv.invalid';process.env.KV_REST_API_TOKEN='kv-test-token';
+ assert.equal((await call('config')).value.accounts,true);
+ assert.equal((await call('login',{email:'nobody@example.com',password:'correct horse'})).code,401);
+ assert.deepEqual(seen,{url:'https://kv.invalid',auth:'Bearer kv-test-token'});
+ }finally{global.fetch=original;for(const k of ['APP_PASSWORD','SESSION_SECRET','KV_REST_API_URL','KV_REST_API_TOKEN'])delete process.env[k]}
+});

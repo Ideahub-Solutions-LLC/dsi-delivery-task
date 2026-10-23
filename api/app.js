@@ -7,7 +7,9 @@ const digest=s=>createHash('sha256').update(String(s)).digest();
 const same=(a,b)=>timingSafeEqual(digest(a),digest(b));
 const local=()=>process.env.DSI_LOCAL_DEV==='1'&&!process.env.VERCEL;
 const configured=()=>Boolean(process.env.APP_PASSWORD&&process.env.SESSION_SECRET?.length>=32);
-const shared=()=>Boolean(process.env.UPSTASH_REDIS_REST_URL&&process.env.UPSTASH_REDIS_REST_TOKEN);
+// Upstash credentials: set directly, or as KV_REST_API_* by Vercel's Upstash integration.
+const redisUrl=()=>process.env.UPSTASH_REDIS_REST_URL||process.env.KV_REST_API_URL,redisToken=()=>process.env.UPSTASH_REDIS_REST_TOKEN||process.env.KV_REST_API_TOKEN;
+const shared=()=>Boolean(redisUrl()&&redisToken());
 const signature=s=>createHmac('sha256',process.env.SESSION_SECRET||'local-only').update(s).digest('hex');
 // Session cookie: "<expiry>.<base64url user email, empty for a team-password session>.<hmac>"
 const token=(uid='')=>{const t=String(Date.now()+8*60*60*1000)+'.'+Buffer.from(uid).toString('base64url');return t+'.'+signature(t)};
@@ -22,7 +24,7 @@ function profileFields(body,user){
  const personId=String(body.personId||'');if(!recovery.plan.people.some(p=>p.id===personId))throw fail(400,'Choose who you are on the team');
  return {name,personId,phone:cleanText(body.phone,40),timezone:cleanText(body.timezone,60)};
 }
-async function redis(command){const r=await fetch(process.env.UPSTASH_REDIS_REST_URL,{method:'POST',headers:{Authorization:`Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`,'Content-Type':'application/json'},body:JSON.stringify(command)});if(!r.ok)throw Error('Shared storage unavailable');const d=await r.json();if(d.error)throw Error('Shared storage unavailable');return d.result;}
+async function redis(command){const r=await fetch(redisUrl(),{method:'POST',headers:{Authorization:`Bearer ${redisToken()}`,'Content-Type':'application/json'},body:JSON.stringify(command)});if(!r.ok)throw Error('Shared storage unavailable');const d=await r.json();if(d.error)throw Error('Shared storage unavailable');return d.result;}
 const key=()=>process.env.DSI_STORAGE_KEY||'dsi-daily-delivery-v1';
 async function state(){const s=await redis(['GET',key()]);return s?JSON.parse(s):empty();}
 const scalar=(s,max=8000)=>typeof s==='string'&&s.length<=max;

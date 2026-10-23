@@ -45,7 +45,8 @@ The Vercel app (`public/`, `api/app.js`, `lib/accounts.js`) has a login page, a 
   your name, email and password — or *Sign up with Google* instead of a password.
 - **Sign in** takes email + password or *Sign in with Google*. A Google account whose verified email
   matches an existing account is linked to it automatically.
-- Accounts are stored in Upstash Redis, so set `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
+- Accounts are stored in Upstash Redis, so set `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`
+  (or the `KV_REST_API_URL` / `KV_REST_API_TOKEN` pair that Vercel's Upstash integration creates).
   Without Redis the app falls back to the shared team password and sign-up is disabled.
   Locally, `node dev.mjs` (which reads `.env`) stores accounts in `data/users.local.json`.
 
