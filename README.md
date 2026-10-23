@@ -45,9 +45,10 @@ Changes made in this local copy stay local; they do not sync back to the live si
 The Vercel app (`public/`, `api/app.js`, `lib/accounts.js`) opens on a login page. Everyone signs in with
 their own email and password; there is no shared team password.
 
-- **Sign up** asks who you are on the team (from *Team & ownership*), your name, email and password.
+- **Sign up** asks who you are on the team (from *Team & ownership*), your name, a username, email and password.
+  Usernames are 3–30 letters, numbers, dots, dashes or underscores; usernames and emails are each unique.
   Anyone who can reach the site can create an account.
-- **Sign in** takes email + password. Passwords are stored as scrypt hashes.
+- **Sign in** takes your username *or* email, plus your password. Passwords are stored as scrypt hashes.
 - **My profile** shows your account details and your role, authority, reporting line, backup, hours cap
   and AI agents from *Team & ownership*, plus your deliverable counts. You can edit your name, role,
   phone and time zone.

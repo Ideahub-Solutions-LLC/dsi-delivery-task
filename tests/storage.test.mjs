@@ -5,6 +5,7 @@ const secret='test-only-secret-with-more-than-32-characters';
 function fakeRedis(db){return async(_url,opts)=>{const c=JSON.parse(opts.body);let result;
  if(c[0]==='GET')result=db.get(c[1])??null;
  if(c[0]==='SET'){if(c[3]==='NX'&&db.has(c[1]))result=null;else{db.set(c[1],c[2]);result='OK'}}
+ if(c[0]==='DEL'){result=db.delete(c[1])?1:0}
  if(c[0]==='INCR'){result=(db.get(c[1])||0)+1;db.set(c[1],result)}
  if(c[0]==='EXPIRE')result=1;
  if(c[0]==='EVAL'){const old=JSON.parse(db.get(c[3])||'{"revision":0}');result=old.revision===Number(c[4])?1:0;if(result)db.set(c[3],c[5])}
@@ -20,16 +21,25 @@ test('accounts, validation, shared updates and stale revisions',async()=>{
  // There is no team password and no access code: only personal accounts.
  assert.equal((await call('login',{password:'anything'})).code,401);
  assert.equal((await call('google',{credential:'x'})).code,401);
- const account={personId:'wyline',name:'Wyline',email:'Wyline@Example.com',password:'correct horse'};
+ const account={personId:'wyline',name:'Wyline',username:'Wyline.R',email:'Wyline@Example.com',password:'correct horse'};
  assert.equal((await call('signup',{...account,personId:'nobody'})).code,400);
  assert.equal((await call('signup',{...account,password:'short'})).code,400);
  assert.equal((await call('signup',{...account,email:'not-an-email'})).code,400);
- const signup=await call('signup',account);assert.equal(signup.code,200);assert.equal(signup.value.user.email,'wyline@example.com');assert.equal(signup.value.user.passwordHash,undefined);
- assert.equal((await call('signup',account)).code,409);
+ for(const username of ['','ab','has space','wy@line','-dash','x'.repeat(31)])assert.equal((await call('signup',{...account,username})).code,400,username);
+ const signup=await call('signup',account);assert.equal(signup.code,200);assert.equal(signup.value.user.email,'wyline@example.com');assert.equal(signup.value.user.username,'wyline.r');assert.equal(signup.value.user.passwordHash,undefined);
+ // Usernames and emails are each unique; a rejected sign-up does not keep the username it tried.
+ assert.equal((await call('signup',{...account,email:'other@example.com'})).code,409);
+ assert.equal((await call('signup',{...account,username:'someone-else'})).code,409);
+ assert.equal(db.has('dsi-username:someone-else'),false);
  assert.ok(!db.get('dsi-user:wyline@example.com').includes('correct horse'));
- assert.equal((await call('login',{email:'wyline@example.com',password:'wrong password'})).code,401);
- assert.equal((await call('login',{email:'nobody@example.com',password:'correct horse'})).code,401);
- const login=await call('login',{email:' WYLINE@example.com ',password:'correct horse'});assert.equal(login.code,200);const cookie=cookieOf(login);
+ // Sign in with either the username or the email, in any letter case.
+ assert.equal((await call('login',{login:'wyline.r',password:'wrong password'})).code,401);
+ assert.equal((await call('login',{login:'wyline@example.com',password:'wrong password'})).code,401);
+ assert.equal((await call('login',{login:'nobody',password:'correct horse'})).code,401);
+ assert.equal((await call('login',{login:'nobody@example.com',password:'correct horse'})).code,401);
+ assert.equal((await call('login',{login:' WYLINE.R ',password:'correct horse'})).code,200);
+ assert.equal((await call('login',{email:'wyline@example.com',password:'correct horse'})).code,200);
+ const login=await call('login',{login:' WYLINE@example.com ',password:'correct horse'});assert.equal(login.code,200);const cookie=cookieOf(login);
  const boot=await call('bootstrap',null,cookie);assert.equal(boot.code,200);assert.equal(boot.value.plan.tasks.length,494);assert.equal(Object.keys(boot.value.views).length,9);assert.equal(boot.value.user.personId,'wyline');
  const profile=await call('profile',{name:'Wyline R.',personId:'wyline',phone:'+1 555 0100',timezone:'America/Los_Angeles'},cookie);assert.equal(profile.code,200);assert.equal(profile.value.user.name,'Wyline R.');
  assert.equal((await call('profile',{name:'Wyline',personId:'nobody'},cookie)).code,400);
@@ -43,15 +53,15 @@ test('accounts, validation, shared updates and stale revisions',async()=>{
  assert.equal((await call('state',null,cookie+'tampered')).code,401);
  // Login attempts are rate limited per client.
  for(const k of db.keys())if(k.startsWith('dsi-login:'))db.delete(k);
- let last;for(let i=0;i<21;i++)last=await call('login',{email:'wyline@example.com',password:'wrong password'});assert.equal(last.code,429);
+ let last;for(let i=0;i<21;i++)last=await call('login',{login:'wyline.r',password:'wrong password'});assert.equal(last.code,429);
  }finally{global.fetch=original;for(const k of ['SESSION_SECRET','UPSTASH_REDIS_REST_URL','UPSTASH_REDIS_REST_TOKEN'])delete process.env[k]}
 });
 test('sign-in is unavailable without account storage',async()=>{
  try{
  process.env.SESSION_SECRET=secret;
  assert.equal((await call('config')).value.accounts,false);
- assert.equal((await call('login',{email:'w@example.com',password:'correct horse'})).code,503);
- assert.equal((await call('signup',{personId:'wyline',name:'W',email:'w@example.com',password:'correct horse'})).code,503);
+ assert.equal((await call('login',{login:'w@example.com',password:'correct horse'})).code,503);
+ assert.equal((await call('signup',{personId:'wyline',name:'W',username:'wyline',email:'w@example.com',password:'correct horse'})).code,503);
  assert.equal((await call('bootstrap')).code,401);
  }finally{delete process.env.SESSION_SECRET}
 });

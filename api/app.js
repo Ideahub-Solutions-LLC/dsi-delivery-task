@@ -1,6 +1,6 @@
 import {readFile} from 'node:fs/promises';
 import {createHmac,createHash,timingSafeEqual} from 'node:crypto';
-import {accountStore,hashPassword,checkPassword,normalEmail,validEmail,cleanText,publicUser,fail} from '../lib/accounts.js';
+import {accountStore,hashPassword,checkPassword,normalEmail,validEmail,normalUsername,validUsername,cleanText,publicUser,fail} from '../lib/accounts.js';
 const recovery=JSON.parse(await readFile(new URL('../private/recovery.json',import.meta.url),'utf8'));
 const empty=()=>({revision:0,tasks:{},milestones:{},results:{},log:[]});
 const digest=s=>createHash('sha256').update(String(s)).digest();
@@ -58,15 +58,19 @@ export default async function handler(req,res){
   if(await limited(req))return send(429,{error:'Too many attempts. Try again in a minute.'});
  }
  if(action==='login'&&req.method==='POST'){
-  const user=await store.getUser(normalEmail(body.email));
-  if(!await checkPassword(body.password,user?.passwordHash))return send(401,{error:'Incorrect email or password'});
+  const id=String(body.login??body.email??'').trim().toLowerCase();
+  const user=await store.getUser(id.includes('@')?normalEmail(id):await store.emailForUsername(normalUsername(id))||'');
+  if(!await checkPassword(body.password,user?.passwordHash))return send(401,{error:'Incorrect username, email or password'});
   user.lastLoginAt=new Date().toISOString();await store.saveUser(user);startSession(res,user.email);return send(200,{ok:true});
  }
  if(action==='signup'&&req.method==='POST'){
   const email=normalEmail(body.email);if(!validEmail(email))return send(400,{error:'Enter a valid email address'});
+  const username=normalUsername(body.username);if(!validUsername(username))return send(400,{error:'Choose a username of 3–30 letters, numbers, dots, dashes or underscores'});
   if(typeof body.password!=='string'||body.password.length<8||body.password.length>200)return send(400,{error:'Use a password of at least 8 characters'});
-  const now=new Date().toISOString();const user={email,passwordHash:await hashPassword(body.password),...profileFields(body),createdAt:now,lastLoginAt:now};
-  if(!await store.createUser(user))return send(409,{error:'An account with this email already exists. Sign in instead.'});
+  const now=new Date().toISOString();const user={email,username,passwordHash:await hashPassword(body.password),...profileFields(body),createdAt:now,lastLoginAt:now};
+  // Claim the username first so two sign-ups can never share one; give it back if the email is taken.
+  if(!await store.claimUsername(username,email))return send(409,{error:'That username is taken. Choose another.'});
+  if(!await store.createUser(user)){await store.releaseUsername(username);return send(409,{error:'An account with this email already exists. Sign in instead.'});}
   startSession(res,user.email);return send(200,{user:publicUser(user)});
  }
  if(action==='logout'&&req.method==='POST'){res.setHeader('Set-Cookie','dsi_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0; Secure');return send(200,{ok:true});}
