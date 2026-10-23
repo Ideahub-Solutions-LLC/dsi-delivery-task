@@ -1,5 +1,6 @@
 import {readFile} from 'node:fs/promises';
 import {createHmac,createHash,timingSafeEqual} from 'node:crypto';
+import {accountStore,hashPassword,checkPassword,verifyGoogle,normalEmail,validEmail,cleanText,publicUser,fail} from '../lib/accounts.js';
 const recovery=JSON.parse(await readFile(new URL('../private/recovery.json',import.meta.url),'utf8'));
 const empty=()=>({revision:0,tasks:{},milestones:{},results:{},log:[]});
 const digest=s=>createHash('sha256').update(String(s)).digest();
@@ -8,8 +9,19 @@ const local=()=>process.env.DSI_LOCAL_DEV==='1'&&!process.env.VERCEL;
 const configured=()=>Boolean(process.env.APP_PASSWORD&&process.env.SESSION_SECRET?.length>=32);
 const shared=()=>Boolean(process.env.UPSTASH_REDIS_REST_URL&&process.env.UPSTASH_REDIS_REST_TOKEN);
 const signature=s=>createHmac('sha256',process.env.SESSION_SECRET||'local-only').update(s).digest('hex');
-const token=()=>{const t=String(Date.now()+8*60*60*1000);return t+'.'+signature(t)};
-function authorized(req){if(local())return true;const c=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('dsi_session='))?.slice(12)||'';const [t,s]=c.split('.');return configured()&&Number(t)>Date.now()&&same(s,signature(t));}
+// Session cookie: "<expiry>.<base64url user email, empty for a team-password session>.<hmac>"
+const token=(uid='')=>{const t=String(Date.now()+8*60*60*1000)+'.'+Buffer.from(uid).toString('base64url');return t+'.'+signature(t)};
+function session(req){const c=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('dsi_session='))?.slice(12)||'';const [t,u,s]=c.split('.');if(!(configured()||local())||!(Number(t)>Date.now())||u===undefined||s===undefined||!same(s,signature(t+'.'+u)))return null;return {uid:Buffer.from(u,'base64url').toString()};}
+const startSession=(res,uid)=>res.setHeader('Set-Cookie',`dsi_session=${token(uid)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800${local()?'':'; Secure'}`);
+const accounts=()=>accountStore(shared()&&redis,local());
+const accessOk=code=>local()&&!process.env.APP_PASSWORD?true:same(code??'',process.env.APP_PASSWORD);
+const team=()=>recovery.plan.people.map(({id,name,role,kind})=>({id,name,role,kind}));
+async function limited(req){if(!shared())return false;const ip=req.headers['x-forwarded-for']||'unknown';const rk='dsi-login:'+digest(ip).toString('hex')+':'+Math.floor(Date.now()/60000);const attempts=await redis(['INCR',rk]);if(attempts===1)await redis(['EXPIRE',rk,120]);return attempts>20;}
+function profileFields(body,user){
+ const name=cleanText(body.name,80)||user?.name||'';if(!name)throw fail(400,'Enter your name');
+ const personId=String(body.personId||'');if(!recovery.plan.people.some(p=>p.id===personId))throw fail(400,'Choose who you are on the team');
+ return {name,personId,phone:cleanText(body.phone,40),timezone:cleanText(body.timezone,60)};
+}
 async function redis(command){const r=await fetch(process.env.UPSTASH_REDIS_REST_URL,{method:'POST',headers:{Authorization:`Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`,'Content-Type':'application/json'},body:JSON.stringify(command)});if(!r.ok)throw Error('Shared storage unavailable');const d=await r.json();if(d.error)throw Error('Shared storage unavailable');return d.result;}
 const key=()=>process.env.DSI_STORAGE_KEY||'dsi-daily-delivery-v1';
 async function state(){const s=await redis(['GET',key()]);return s?JSON.parse(s):empty();}
@@ -38,14 +50,47 @@ export default async function handler(req,res){
  if(!configured()&&!local())return send(503,{error:'Configure APP_PASSWORD and a SESSION_SECRET of at least 32 characters in Vercel, then redeploy.'});
  if(req.method!=='GET'&&req.headers.origin&&req.headers.origin!==`https://${req.headers.host}`&&!(local()&&req.headers.origin===`http://${req.headers.host}`))return send(403,{error:'Origin not allowed'});
  let body=req.body;if(typeof body==='string'){try{body=JSON.parse(body)}catch{return send(400,{error:'Invalid JSON'})}}body||={};
+ const store=accounts();
+ if(action==='config'&&req.method==='GET')return send(200,{accounts:Boolean(store),google:process.env.GOOGLE_CLIENT_ID||''});
+ if(['login','team','signup','google'].includes(action)&&req.method==='POST'&&await limited(req))return send(429,{error:'Too many attempts. Try again in a minute.'});
  if(action==='login'&&req.method==='POST'){
-  if(shared()){const ip=req.headers['x-forwarded-for']||'unknown';const rk='dsi-login:'+digest(ip).toString('hex')+':'+Math.floor(Date.now()/60000);const attempts=await redis(['INCR',rk]);if(attempts===1)await redis(['EXPIRE',rk,120]);if(attempts>10)return send(429,{error:'Too many attempts. Try again in a minute.'});}
-  if(!local()&&!same(body.password,process.env.APP_PASSWORD))return send(401,{error:'Incorrect password'});
-  res.setHeader('Set-Cookie',`dsi_session=${token()}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800${local()?'':'; Secure'}`);return send(200,{ok:true});
+  if(!store){if(!local()&&!same(body.password,process.env.APP_PASSWORD))return send(401,{error:'Incorrect password'});startSession(res,'');return send(200,{ok:true});}
+  const user=await store.getUser(normalEmail(body.email));
+  if(!await checkPassword(body.password,user?.passwordHash))return send(401,{error:user&&!user.passwordHash?'This account uses Google sign-in. Use the Google button below.':'Incorrect email or password'});
+  user.lastLoginAt=new Date().toISOString();await store.saveUser(user);startSession(res,user.email);return send(200,{ok:true});
+ }
+ if(action==='team'&&req.method==='POST'){if(!accessOk(body.accessCode))return send(401,{error:'That team access code is not right. Ask Wyline for the current code.'});return send(200,{people:team()});}
+ if(action==='signup'&&req.method==='POST'){
+  if(!store)return send(503,{error:'Accounts need shared storage. Configure Upstash Redis in Vercel and redeploy.'});
+  if(!accessOk(body.accessCode))return send(401,{error:'That team access code is not right. Ask Wyline for the current code.'});
+  const now=new Date().toISOString();let user;
+  if(body.method==='google'){
+   const g=await verifyGoogle(body.credential,process.env.GOOGLE_CLIENT_ID);
+   user={email:g.email,googleSub:g.sub,picture:g.picture,...profileFields({...body,name:body.name||g.name}),createdAt:now,lastLoginAt:now};
+  }else{
+   const email=normalEmail(body.email);if(!validEmail(email))return send(400,{error:'Enter a valid email address'});
+   if(typeof body.password!=='string'||body.password.length<8||body.password.length>200)return send(400,{error:'Use a password of at least 8 characters'});
+   user={email,passwordHash:await hashPassword(body.password),...profileFields(body),createdAt:now,lastLoginAt:now};
+  }
+  if(!await store.createUser(user))return send(409,{error:'An account with this email already exists. Sign in instead.'});
+  if(user.googleSub)await store.linkGoogle(user.googleSub,user.email);
+  startSession(res,user.email);return send(200,{user:publicUser(user)});
+ }
+ if(action==='google'&&req.method==='POST'){
+  if(!store)return send(503,{error:'Accounts need shared storage. Configure Upstash Redis in Vercel and redeploy.'});
+  const g=await verifyGoogle(body.credential,process.env.GOOGLE_CLIENT_ID);
+  const user=await store.getUser(await store.emailForGoogle(g.sub)||g.email);
+  if(!user)return send(404,{error:'No workspace account uses this Google account yet. Sign up first.',signup:true});
+  if(user.googleSub&&user.googleSub!==g.sub)return send(401,{error:'This email is linked to a different Google account.'});
+  if(!user.googleSub){user.googleSub=g.sub;user.picture||=g.picture;await store.linkGoogle(g.sub,user.email);}
+  user.lastLoginAt=new Date().toISOString();await store.saveUser(user);startSession(res,user.email);return send(200,{ok:true});
  }
  if(action==='logout'&&req.method==='POST'){res.setHeader('Set-Cookie','dsi_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0; Secure');return send(200,{ok:true});}
- if(!authorized(req))return send(401,{error:'Sign in to open this workspace.'});
- if(action==='bootstrap'&&req.method==='GET')return send(200,{...recovery,mode:shared()?'shared':'local',state:shared()?await state():empty()});
+ const sess=session(req);if(!sess)return send(401,{error:'Sign in to open this workspace.'});
+ // Team-password sessions only exist while accounts are unavailable; once accounts are enabled everyone signs in personally.
+ const user=sess.uid?await store?.getUser(sess.uid):null;if(store?!user:sess.uid)return send(401,{error:'Sign in to open this workspace.'});
+ if(action==='profile'&&req.method==='POST'){if(!user)return send(409,{error:'Profiles need personal accounts, which need shared storage.'});Object.assign(user,profileFields(body,user),{updatedAt:new Date().toISOString()});await store.saveUser(user);return send(200,{user:publicUser(user)});}
+ if(action==='bootstrap'&&req.method==='GET')return send(200,{...recovery,user:publicUser(user),mode:shared()?'shared':'local',state:shared()?await state():empty()});
  if(action==='state'&&req.method==='GET')return send(200,{mode:shared()?'shared':'local',state:shared()?await state():empty()});
  if(action==='update'&&req.method==='POST'){
   if(!shared())return send(409,{error:'Shared storage is not configured. Use device-local saving.'});
@@ -60,5 +105,5 @@ export default async function handler(req,res){
   const ok=await redis(['EVAL',script,1,key(),String(revision),JSON.stringify(current)]);if(ok!==1)return send(409,{error:'Another editor saved first. Refresh and retry.'});return send(200,{state:current});
  }
  return send(405,{error:'Method not allowed'});
- }catch{return send(503,{error:'Shared service unavailable. Your unsaved edit remains open; retry after service recovery.'});}
+ }catch(e){if(e.status)return send(e.status,{error:e.message});return send(503,{error:'Shared service unavailable. Your unsaved edit remains open; retry after service recovery.'});}
 }
