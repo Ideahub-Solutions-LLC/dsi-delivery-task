@@ -1,0 +1,12 @@
+{
+  "name": "dsi-daily-delivery",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Offline copy of the DSI Daily Delivery site",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

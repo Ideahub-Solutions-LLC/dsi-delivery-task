@@ -1,0 +1,33 @@
+{
+  "source": "https://dsi-daily-delivery-oct-dec-2026.ideahub-9058.chatgpt.site/",
+  "recoveredOn": "2026-10-23",
+  "type": "standalone-reconstruction",
+  "originalSourceRecovered": false,
+  "separateSharedProgressRecovered": false,
+  "tasks": 494,
+  "calendarDays": 58,
+  "views": [
+    "Daily delivery",
+    "Work board",
+    "Gantt timeline",
+    "Day-by-day map",
+    "Team & ownership",
+    "Targets & results",
+    "Proposal to delivery",
+    "Recovery desk",
+    "Activity log"
+  ],
+  "validation": [
+    "build",
+    "syntax",
+    "server-auth",
+    "update-validation",
+    "acceptance-evidence-reviewer",
+    "optimistic-conflict"
+  ],
+  "notVerified": [
+    "browser-visual-interactions",
+    "Vercel-deployment",
+    "real-Redis-sync"
+  ]
+}

@@ -1,0 +1,64 @@
+import {readFile} from 'node:fs/promises';
+import {createHmac,createHash,timingSafeEqual} from 'node:crypto';
+const recovery=JSON.parse(await readFile(new URL('../private/recovery.json',import.meta.url),'utf8'));
+const empty=()=>({revision:0,tasks:{},milestones:{},results:{},log:[]});
+const digest=s=>createHash('sha256').update(String(s)).digest();
+const same=(a,b)=>timingSafeEqual(digest(a),digest(b));
+const local=()=>process.env.DSI_LOCAL_DEV==='1'&&!process.env.VERCEL;
+const configured=()=>Boolean(process.env.APP_PASSWORD&&process.env.SESSION_SECRET?.length>=32);
+const shared=()=>Boolean(process.env.UPSTASH_REDIS_REST_URL&&process.env.UPSTASH_REDIS_REST_TOKEN);
+const signature=s=>createHmac('sha256',process.env.SESSION_SECRET||'local-only').update(s).digest('hex');
+const token=()=>{const t=String(Date.now()+8*60*60*1000);return t+'.'+signature(t)};
+function authorized(req){if(local())return true;const c=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('dsi_session='))?.slice(12)||'';const [t,s]=c.split('.');return configured()&&Number(t)>Date.now()&&same(s,signature(t));}
+async function redis(command){const r=await fetch(process.env.UPSTASH_REDIS_REST_URL,{method:'POST',headers:{Authorization:`Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`,'Content-Type':'application/json'},body:JSON.stringify(command)});if(!r.ok)throw Error('Shared storage unavailable');const d=await r.json();if(d.error)throw Error('Shared storage unavailable');return d.result;}
+const key=()=>process.env.DSI_STORAGE_KEY||'dsi-daily-delivery-v1';
+async function state(){const s=await redis(['GET',key()]);return s?JSON.parse(s):empty();}
+const scalar=(s,max=8000)=>typeof s==='string'&&s.length<=max;
+export function validatePatch(kind,id,p){
+ if(!p||typeof p!=='object'||Array.isArray(p))throw Error('Invalid update');
+ const allowed=kind==='tasks'?['status','actual','evidence','blocker','helpNeeded','rescueOwner','recoveryDate','acceptedBy','notes']:kind==='milestones'?['status','evidence','acceptedBy']:kind==='results'?['actuals','evidence']:[];
+ if(!allowed.length||Object.keys(p).some(k=>!allowed.includes(k)))throw Error('Invalid update fields');
+ const base=kind==='tasks'?recovery.plan.tasks.find(x=>x.id===id):kind==='milestones'?recovery.plan.milestones.find(x=>x.id===id):recovery.plan.calendar.find(x=>x.date===id);
+ if(!base)throw Error('Unknown record');
+ for(const [k,v] of Object.entries(p)){
+  if(k==='actual'){if(v!==null&&(!Number.isFinite(v)||v<0))throw Error('Actual must be a nonnegative number');}
+  else if(k==='actuals'){if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).some(x=>!Object.hasOwn(base.actuals,x)))throw Error('Invalid metrics');for(const n of Object.values(v))if(n!==null&&(!Number.isFinite(n)||n<0))throw Error('Metrics must be nonnegative numbers');}
+  else if(!scalar(v))throw Error('Invalid text');
+ }
+ if(p.status&&!recovery.plan.meta.statuses.includes(p.status))throw Error('Invalid stage');
+ if(p.recoveryDate&&(!/^20\d{2}-\d{2}-\d{2}$/.test(p.recoveryDate)||!Number.isFinite(Date.parse(p.recoveryDate+'T12:00:00Z'))))throw Error('Invalid recovery date');
+ if(p.status==='Accepted'&&(!p.evidence?.trim()||!p.acceptedBy?.trim()))throw Error('Acceptance requires evidence and a recorded reviewer');
+ if(kind==='results'&&Object.values(p.actuals||{}).some(x=>x!==null)&&!p.evidence?.trim())throw Error('Results require source evidence');
+ return p;
+}
+export default async function handler(req,res){
+ res.setHeader('Cache-Control','no-store');const send=(code,obj)=>res.status(code).json(obj);
+ try{
+ const action=new URL(req.url,'http://localhost').searchParams.get('action')||'bootstrap';
+ if(!configured()&&!local())return send(503,{error:'Configure APP_PASSWORD and a SESSION_SECRET of at least 32 characters in Vercel, then redeploy.'});
+ if(req.method!=='GET'&&req.headers.origin&&req.headers.origin!==`https://${req.headers.host}`&&!(local()&&req.headers.origin===`http://${req.headers.host}`))return send(403,{error:'Origin not allowed'});
+ let body=req.body;if(typeof body==='string'){try{body=JSON.parse(body)}catch{return send(400,{error:'Invalid JSON'})}}body||={};
+ if(action==='login'&&req.method==='POST'){
+  if(shared()){const ip=req.headers['x-forwarded-for']||'unknown';const rk='dsi-login:'+digest(ip).toString('hex')+':'+Math.floor(Date.now()/60000);const attempts=await redis(['INCR',rk]);if(attempts===1)await redis(['EXPIRE',rk,120]);if(attempts>10)return send(429,{error:'Too many attempts. Try again in a minute.'});}
+  if(!local()&&!same(body.password,process.env.APP_PASSWORD))return send(401,{error:'Incorrect password'});
+  res.setHeader('Set-Cookie',`dsi_session=${token()}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800${local()?'':'; Secure'}`);return send(200,{ok:true});
+ }
+ if(action==='logout'&&req.method==='POST'){res.setHeader('Set-Cookie','dsi_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0; Secure');return send(200,{ok:true});}
+ if(!authorized(req))return send(401,{error:'Sign in to open this workspace.'});
+ if(action==='bootstrap'&&req.method==='GET')return send(200,{...recovery,mode:shared()?'shared':'local',state:shared()?await state():empty()});
+ if(action==='state'&&req.method==='GET')return send(200,{mode:shared()?'shared':'local',state:shared()?await state():empty()});
+ if(action==='update'&&req.method==='POST'){
+  if(!shared())return send(409,{error:'Shared storage is not configured. Use device-local saving.'});
+  const {kind,id,patch,revision,editor}=body;if(!Number.isSafeInteger(revision)||revision<0||!scalar(editor,120)||!editor.trim())return send(400,{error:'Editor name and revision required'});
+  try{validatePatch(kind,id,patch)}catch(e){return send(400,{error:e.message})}
+  const current=await state();if(current.revision!==revision)return send(409,{error:'Another editor saved first. Refresh, review their update, and retry.'});
+  const now=new Date().toISOString();const prev=current[kind][id]||{};const next={...prev,...patch};
+  if(next.status==='Accepted'&&(!next.evidence?.trim()||!next.acceptedBy?.trim()))return send(400,{error:'Accepted work must retain evidence and a reviewer'});
+  if(kind!=='results')next.acceptedAt=next.status==='Accepted'?(prev.acceptedAt||now):null;
+  current[kind][id]=next;current.log.unshift({at:now,editor,kind,id,before:prev,after:next});current.log=current.log.slice(0,500);current.revision++;
+  const script="local old=redis.call('GET',KEYS[1]); local rev=0; if old then rev=cjson.decode(old).revision end; if rev~=tonumber(ARGV[1]) then return 0 end; redis.call('SET',KEYS[1],ARGV[2]); return 1";
+  const ok=await redis(['EVAL',script,1,key(),String(revision),JSON.stringify(current)]);if(ok!==1)return send(409,{error:'Another editor saved first. Refresh and retry.'});return send(200,{state:current});
+ }
+ return send(405,{error:'Method not allowed'});
+ }catch{return send(503,{error:'Shared service unavailable. Your unsaved edit remains open; retry after service recovery.'});}
+}

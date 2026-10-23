@@ -1,0 +1,95 @@
+{
+  "overrides": {
+    "T0001": {
+      "id": "T0001",
+      "date": "2026-10-22",
+      "originalDueDate": "2026-10-22",
+      "dueTime": "16:45",
+      "owner": "Wyline",
+      "support": [],
+      "workstream": "Program Director",
+      "title": "Take control; freeze and book reset",
+      "deliverable": "Kickoff ownership register; paused-ads proof; reset call request; daily standup/review cadence",
+      "target": 1,
+      "unit": "accepted output",
+      "estimateHours": 2.5,
+      "dependencies": [],
+      "acceptance": "All 9 internal owners acknowledged; legacy lead freeze and ads pause evidenced; Nic reset requested for Oct 27.",
+      "status": "Ready",
+      "actual": "",
+      "evidence": "Lorem ipsum",
+      "blocker": "",
+      "helpNeeded": "",
+      "rescueOwner": "",
+      "recoveryDate": "",
+      "acceptedBy": "",
+      "closedAt": null,
+      "notes": "Time is a planning reserve inclusive of standup, reviews and documentation; release unused reserve. Original due date is fixed; recovery date is separate.",
+      "targetBasis": "Proposed daily allocation of source responsibilities",
+      "milestoneIds": [
+        "M01"
+      ],
+      "targetMode": "checklist",
+      "targetKind": "checklist",
+      "source": "DSI Reset PDF: lane responsibilities and dated runbook; dated allocation proposed for this tracker.",
+      "acceptedAt": null,
+      "capacityReason": "",
+      "reviewNote": "",
+      "version": 1,
+      "updatedAt": "2026-10-23T03:10:49.791Z",
+      "updatedBy": "RTP Team"
+    }
+  },
+  "metrics": {},
+  "milestones": {},
+  "audit": [
+    {
+      "id": "2026-10-23T03:10:49.791Z-mhoy9j",
+      "at": "2026-10-23T03:10:49.791Z",
+      "actorName": "RTP Team",
+      "entityType": "task",
+      "entityId": "T0001",
+      "payload": {
+        "id": "T0001",
+        "date": "2026-10-22",
+        "originalDueDate": "2026-10-22",
+        "dueTime": "16:45",
+        "owner": "Wyline",
+        "support": [],
+        "workstream": "Program Director",
+        "title": "Take control; freeze and book reset",
+        "deliverable": "Kickoff ownership register; paused-ads proof; reset call request; daily standup/review cadence",
+        "target": 1,
+        "unit": "accepted output",
+        "estimateHours": 2.5,
+        "dependencies": [],
+        "acceptance": "All 9 internal owners acknowledged; legacy lead freeze and ads pause evidenced; Nic reset requested for Oct 27.",
+        "status": "Ready",
+        "actual": "",
+        "evidence": "Lorem ipsum",
+        "blocker": "",
+        "helpNeeded": "",
+        "rescueOwner": "",
+        "recoveryDate": "",
+        "acceptedBy": "",
+        "closedAt": null,
+        "notes": "Time is a planning reserve inclusive of standup, reviews and documentation; release unused reserve. Original due date is fixed; recovery date is separate.",
+        "targetBasis": "Proposed daily allocation of source responsibilities",
+        "milestoneIds": [
+          "M01"
+        ],
+        "targetMode": "checklist",
+        "targetKind": "checklist",
+        "source": "DSI Reset PDF: lane responsibilities and dated runbook; dated allocation proposed for this tracker.",
+        "acceptedAt": null,
+        "capacityReason": "",
+        "reviewNote": ""
+      },
+      "version": 1
+    }
+  ],
+  "user": {
+    "name": "RTP Team"
+  },
+  "syncedAt": "2026-10-23T03:10:49.791Z"
+}
