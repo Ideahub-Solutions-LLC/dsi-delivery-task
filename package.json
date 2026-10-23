@@ -10,6 +10,6 @@
     "test": "node --test tests/"
   },
   "engines": {
-    "node": "22.x"
+    "node": "24.x"
   }
 }
